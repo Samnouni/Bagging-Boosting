@@ -1,0 +1,312 @@
+#library
+```{r cars}
+library(forestmodel)
+library(ggplot2)
+library(cowplot) # graphe combiner
+library(forcats) # facteur
+library(randomForest)
+library(ade4)
+library(rpart)
+library(rpart.plot)
+library(xgboost)
+library(caret) #matrice de confusion
+library(adabag)
+```
+
+
+```{r cars}
+d <- read.table("~/Bureau/Méthodes_Dapprentissag/bagging_boosting/1625Data.txt",sep = ',',header=T)
+
+```
+
+
+```{r cars}
+head(d)
+```
+```{r cars}
+
+```
+```{r cars}
+d$Octamer=as.character(d$Octamer)
+Table_char=matrix(NA,ncol = 8,nrow = 1625)
+for (i in 1:1625)
+{
+  Table_char[i,]=unlist(strsplit(d[i,1],""))
+}
+c=cbind(d$Clived,Table_char)
+```
+
+
+```{r cars}
+d=data.frame(c)
+names(d)=c("Clived",paste0("Octamer",1:8))
+```
+
+```{r cars}
+d$Octamer1=as.factor(d$Octamer1)
+d$Octamer2=as.factor(d$Octamer2)
+d$Octamer3=as.factor(d$Octamer3)
+d$Octamer4=as.factor(d$Octamer4)
+d$Octamer5=as.factor(d$Octamer5)
+d$Octamer6=as.factor(d$Octamer6)
+d$Octamer7=as.factor(d$Octamer7)
+d$Octamer8=as.factor(d$Octamer8)
+d$Clived=as.factor(d$Clived)
+```
+
+```{r cars}
+d$Clived=factor(d$Clived,levels=c("-1","1"),labels = c("0","1"))
+```
+
+```{r cars}
+summary(d)
+```
+
+
+```{r cars}
+idtrain=sample(1:nrow(d),0.8*nrow(d))
+dtrain=d[idtrain,]
+dtest=d[-idtrain,]
+```
+
+```{r cars}
+prop.table(table(dtest$Clived))
+prop.table(table(dtest$Clived))
+```
+
+
+```{r cars}
+#fonction qui calcul le taux d'erreur
+tx_er=function(pred,vrais){
+  mc=table(pred,vrais)
+  1-sum(diag(mc))/sum(mc)
+}
+
+
+# Classifieur contant
+table_clived=table(dtrain$Clived)
+mcst=names(table_clived)[which.max(table_clived)]
+te_cst=mean(dtest$Clived!=mcst)
+cat("Taux d'erreur de classifieur constant est =",te_cst)
+
+```
+
+```{r cars}
+#reglage par défaut
+mcart=rpart(Clived~.,d=dtrain )
+plotcp(mcart)
+predcart=predict(mcart,newdata = dtest,type = "class")
+te_cart=tx_er(predcart,dtest$Clived)
+rpart.plot(mcart)
+cat("Taux d'erreur de cart par defaut =",te_cart)
+```
+
+```{r cars}
+# arbre maximal
+mcartmax=rpart(Clived~.,d=dtrain,minbucket=1,maxdepth=30,cp=0)
+plotcp(mcartmax)
+rpart.plot(mcartmax)
+predcartmax=predict(mcartmax,newdata=dtest,type = "class")
+te_cartmax=tx_er(predcartmax,dtest$Clived) 
+cat("Taux d'erreur d'arbre maximal est =",te_cartmax)
+
+head(confusionMatrix(dtest$Clived,predcartmax))# matrice de confusion
+```
+Si on élage selon le compromis cout-complexité
+```{r cars}
+mcart=prune(mcartmax,cp=0.013)
+rpart.plot(mcart)
+predcart=predict(mcart,newdata = dtest,type = "class")
+te_cart=tx_er(predcart,dtest$Clived)
+cat("Taux d'erreur d'arbre selon cout-complexite ",te_cart)
+```
+arbre à 1 noeud
+```{r cars}
+mcartone=rpart(Clived~.,d=dtrain,minbucket=1,maxdepth=1,cp=0)
+plotcp(mcartone)
+rpart.plot(mcartone)
+predcartone=predict(mcartone,newdata=dtest,type = "class")
+te_cartone=tx_er(predcartone,dtest$Clived) 
+cat("Taux d'erreur d'arbre maximal est =",te_cartone)
+```
+
+### Bagging
+
+
+```{r cars}
+# Par défaut
+mbag <- bagging(Clived~.,data=dtrain,mfinal=20)
+predbag20 <- predict(mbag,newdata=dtest,type="class")
+te_bag20 <- tx_er(predbag20$class,dtest$Clived) 
+cat(" Taux d'erreur commise par le  classifieur final (par defaut): ",te_bag20)
+
+```
+
+```{r cars}
+# Bagging d'arbres à 1 noeud
+mbagstump <- bagging(Clived~.,data=dtrain,mfinal=20,control=rpart.control(cp=0,maxdepth=1,minbucket=1))
+predbagstump <- predict(mbagstump,newdata=dtest,type="class")
+te_bagstump <- tx_er(predbagstump$class,dtest$Clived)
+cat(" Taux d'erreur commise par le  classifieur final (un seul noeud) : ",te_bagstump)
+```
+```{r cars}
+# Bagging d'arbres profonds
+mbagdeep <- bagging(Clived~.,data=dtrain,mfinal=20,control=rpart.control(cp=0.013,maxdepth=30,minbucket=1))
+predbagdeep <- predict(mbagdeep,newdata=dtest,type="class")
+te_bagdeep <- tx_er(predbagdeep$class,dtest$Clived)
+cat(" Taux d'erreur commise par le  classifieur final (arbres profonds) : ",te_bagdeep)
+
+```
+# Visualisation de l'effet du nombre d'arbres
+```{r cars}
+effetnbTreesBag <- function(m){
+  err <- sapply(1:10, FUN = function(i){
+    bag <- bagging(Clived ~ .,data=dtrain,mfinal=m)
+    predbag <-predict(bag,newdata = dtest)
+    return(tx_er(dtest$Clived,predbag$class))
+  })
+  return(err)
+}
+
+mval <- c(1,2,5,10,20,50)
+err_fn_m_bag <- sapply(mval,FUN = function(m){effetnbTreesBag(m)})
+dmBag <- as.data.frame(err_fn_m_bag)
+names(dmBag) <- paste0("m=",mval)
+boxplot(dmBag,ylab="Taux d'erreur")
+
+plot(mval,apply(err_fn_m_bag,2,mean),type="b",xlab="Nombre d'arbres baggés", ylab="Taux d'erreur")
+
+```
+# RF
+
+
+```{r cars}
+
+mrf <- randomForest(Clived~.,data=dtrain,method="class",ntree=20,mtry=1)
+predrf <- predict(mrf,newdata=dtest,type="class")
+te_rf <- tx_er(predrf,dtest$Clived) 
+```
+# Effet du nombre de variables à chaque coupure
+```{r cars}
+
+effetmtry <- function(m){
+  err <- sapply(1:10, FUN = function(i){
+    rf <- randomForest(Clived ~ .,data=dtrain,ntree=20,mtry=m)
+    predrf <-predict(rf,newdata = dtest)
+    return(tx_er(dtest$Clived,predrf))
+  })
+  return(err)
+}
+
+mtryval <- c(1,2,5,8)
+err_fn_mtry <- sapply(mtryval,FUN = function(m){effetmtry(m)})
+dmBag <- as.data.frame(err_fn_mtry)
+names(dmBag) <- paste0("m=",mtryval)
+boxplot(dmBag,ylab="Taux d'erreur")
+
+plot(mtryval,apply(err_fn_mtry,2,mean),type="b",xlab="mtry",ylab="Taux d'erreur")
+```
+# Effet du nb d'arbres dans la forêt
+```{r cars}
+
+effetnbTrees <- function(m){
+  err <- sapply(1:10, FUN = function(i){
+    rf <- randomForest(Clived ~ .,data=dtrain,mtry=2,ntree=m)
+    predrf <-predict(rf,newdata = dtest)
+    return(tx_er(dtest$Clived,predrf))
+  })
+  return(err)
+}
+
+mval <- c(1,2,5,10,20,50,100,200,500)
+err_fn_m <- sapply(mval,FUN = function(m){effetnbTrees(m)})
+dm <- as.data.frame(err_fn_m)
+names(dm) <- paste0("m=",mval)
+boxplot(dm,ylab="Taux d'erreur")
+
+plot(mval,apply(err_fn_m,2,mean),type="b",xlab="Nombre d'arbres",ylab="Taux d'erreur")
+
+```
+# Boosting
+```{r cars}
+#par défaut 
+mboost_def <- boosting(Clived~.,data=dtrain,mfinal=20,boos=F)
+
+predboost_def <- predict(mboost_def,newdata=dtest,type="class")
+te_boost_def <- tx_er(predboost_def$class,dtest$Clived)
+cat ("Taux d'erreur comise par le classifieur final (par defaut) :",te_boost_def)
+
+```{r cars}
+# un seul noeud
+mbooststump <- boosting(Clived~.,data=dtrain,mfinal=20,boos=F,control=rpart.control(cp=0,maxdepth=1,minbucket=1))
+predbooststump <- predict(mbooststump,newdata=dtest,type="class")
+te_booststump <- tx_er(predbooststump$class,dtest$Clived)
+cat("Taux d'erreur comise par le classifieur final (un seul noeud) :",te_booststump)
+```
+
+```{r cars}
+# arbre profond
+mboostdeep <- boosting(Clived~.,data=dtrain,mfinal=20,boos=T,control=rpart.control(cp=0,maxdepth=30,minbucket=1))
+predboostdeep <- predict(mboostdeep,newdata=dtest,type="class")
+te_boostdeep <- tx_er(predboostdeep$class,dtest$Clived) 
+cat("Taux d'erreur comise par le classifieur final (arbre profond) :",te_boostdeep)
+
+```
+# XGBoost
+
+# Transforme les données en dummy variables
+```{r cars}
+
+class <- as.numeric(d$Clived)
+class <- class-1
+ddummy <- cbind(class,acm.disjonctif(d[,-1]))
+
+ddumtrain <- ddummy[idtrain,]
+ddumtest <- ddummy[-idtrain,]
+
+```
+
+```{r cars}
+dtrainXG <- xgb.DMatrix(as.matrix(ddumtrain[,-1]),label=as.matrix(ddumtrain[,1]))
+dtestXG <- xgb.DMatrix(as.matrix(ddumtest[,-1]),label=as.matrix(ddumtest[,1]))
+watchlist <- list(train=dtrainXG,test=dtestXG)
+
+mxgb <- xgb.train(params = list(max_depth=1, eta = 0.3, objective="binary:logistic"),
+                  data = dtrainXG,
+                  nrounds = 20,
+                  watchlist = watchlist)
+
+```
+
+Application au NewData
+```{r cars}
+NewData=read.table("~/Bureau/Méthodes_Dapprentissag/bagging_boosting/746Data.txt",sep = ',',header=T)
+NewData$Octamer=as.character(NewData$Octamer)
+Table_char=matrix(NA,ncol = 8,nrow = 746)
+for (i in 1:746)
+{
+  Table_char[i,]=unlist(strsplit(NewData[i,1],""))
+}
+u=cbind(NewData$Clived,Table_char)
+NewData=data.frame(u)
+names(NewData)=c("Clived",paste0("Octamer",1:8))
+NewData$Octamer1=as.factor(NewData$Octamer1)
+NewData$Octamer2=as.factor(NewData$Octamer2)
+NewData$Octamer3=as.factor(NewData$Octamer3)
+NewData$Octamer4=as.factor(NewData$Octamer4)
+NewData$Octamer5=as.factor(NewData$Octamer5)
+NewData$Octamer6=as.factor(NewData$Octamer6)
+NewData$Octamer7=as.factor(NewData$Octamer7)
+NewData$Octamer8=as.factor(NewData$Octamer8)
+NewData$Clived=as.factor(NewData$Clived)
+NewData$Clived=factor(NewData$Clived,levels=c("-1","1"),labels = c("0","1"))
+
+
+```
+
+```{r cars}
+mboostdeep <- boosting(Clived~.,data=dtrain,mfinal=20,boos=T,control=rpart.control(cp=0,maxdepth=30,minbucket=1))
+predboostdeep <- predict(mboostdeep,newdata=NewData,type="class")
+te_boostdeep <- tx_er(predboostdeep$class,NewData$Clived) 
+cat("Taux d'erreur comise par le classifieur  :",te_boostdeep)
+table(NewData$Clived,predboostdeep$class)
